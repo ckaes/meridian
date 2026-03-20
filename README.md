@@ -6,39 +6,23 @@
 
 Use your **Claude Max subscription** with [OpenCode](https://opencode.ai) — including full tool execution, multi-turn agentic workflows, and subagent delegation.
 
-## The Problem
+## What This Does
 
-Anthropic doesn't allow Claude Max subscribers to use their subscription with third-party tools like OpenCode. If you want to use Claude in OpenCode, you have to pay for API access separately — even though you're already paying for "unlimited" Claude.
-
-Your options are:
-1. Use Claude's official apps only (limited to their UI)
-2. Pay again for API access on top of your Max subscription
-3. **Use this proxy**
-
-## The Solution
-
-This proxy bridges the gap using Anthropic's own tools:
+This proxy lets you use your existing Claude Max subscription with [OpenCode](https://opencode.ai) and other tools that speak the Anthropic API format. It works by wrapping the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) — Anthropic's official npm package for programmatic Claude access.
 
 ```
 OpenCode → Proxy (localhost:3456) → Claude Agent SDK → Your Claude Max Subscription
 ```
 
-The [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) is Anthropic's **official npm package** that lets developers build with Claude using their Max subscription. This proxy translates OpenCode's API requests into SDK calls and handles tool execution internally.
+The proxy translates Anthropic API requests into Claude Agent SDK calls, handles tool execution internally via MCP tools, and streams responses back in the standard Anthropic SSE format.
 
-**Your Max subscription. Anthropic's official SDK. Zero additional cost.**
+## Disclaimer
 
-## Is This Allowed?
+This project is an **unofficial wrapper** around Anthropic's publicly available [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk). It is not affiliated with, endorsed by, or supported by Anthropic.
 
-**Yes.** Here's why:
+**Use at your own risk.** The authors make no claims regarding compliance with Anthropic's Terms of Service. It is your responsibility to review and comply with [Anthropic's Terms of Service](https://www.anthropic.com/terms) and any applicable usage policies before using this tool. Terms may change at any time.
 
-| Concern | Reality |
-|---------|---------|
-| "Bypassing restrictions" | No. We use Anthropic's public SDK exactly as documented |
-| "Violating TOS" | No. The SDK is designed for programmatic Claude access |
-| "Unauthorized access" | No. You authenticate with `claude login` using your own account |
-| "Reverse engineering" | No. We call `query()` from their npm package, that's it |
-
-The Claude Agent SDK exists specifically to let Max subscribers use Claude programmatically. We're just translating the request format so OpenCode can use it.
+This project simply calls `query()` from Anthropic's public npm package using your own authenticated account. No API keys are intercepted, no authentication is bypassed, and no proprietary systems are reverse-engineered.
 
 ## Features
 
