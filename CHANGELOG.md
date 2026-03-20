@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.1](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.8.0...v1.8.1) (2026-03-20)
+
+
+### Bug Fixes
+
+* Docker auth persistence and non-root user ([afa18f7](https://github.com/rynfar/opencode-claude-max-proxy/commit/afa18f7e9973d651e0f14f1e0623c51d9c8eb0ea))
+* Docker auth persistence and non-root user ([c4f58a6](https://github.com/rynfar/opencode-claude-max-proxy/commit/c4f58a68d3630aed1af863df2bdc7fbf034d92eb)), closes [#15](https://github.com/rynfar/opencode-claude-max-proxy/issues/15)
+
 ## [1.8.0](https://github.com/rynfar/opencode-claude-max-proxy/compare/v1.7.3...v1.8.0) (2026-03-20)
 
 
