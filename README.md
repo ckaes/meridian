@@ -54,6 +54,14 @@ The Claude Agent SDK exposes a `PreToolUse` hook that fires before any tool exec
 
 ## Quick Start
 
+### One-Liner Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ianjwhite99/opencode-with-claude/main/install.sh | bash
+```
+
+Installs everything (Claude CLI, OpenCode, proxy) and gives you an `oc` command. See [opencode-with-claude](https://github.com/ianjwhite99/opencode-with-claude) for details.
+
 ### Prerequisites
 
 1. **Claude Max subscription** — [Subscribe here](https://claude.ai/settings/billing)
