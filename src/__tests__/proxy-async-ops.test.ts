@@ -5,14 +5,14 @@ const { runCli } = await import("../../bin/cli")
 
 describe("proxy async ops", () => {
   it("starts server with async executable resolution", async () => {
-    const serverA = await startProxyServer({ port: 0, host: "127.0.0.1" })
-    const serverB = await startProxyServer({ port: 0, host: "127.0.0.1" })
+    const proxyA = await startProxyServer({ port: 0, host: "127.0.0.1" })
+    const proxyB = await startProxyServer({ port: 0, host: "127.0.0.1" })
 
-    serverA.close()
-    serverB.close()
+    await proxyA.close()
+    await proxyB.close()
 
-    expect(typeof serverA.keepAliveTimeout).toBe("number")
-    expect(typeof serverB.keepAliveTimeout).toBe("number")
+    expect(typeof proxyA.server.keepAliveTimeout).toBe("number")
+    expect(typeof proxyB.server.keepAliveTimeout).toBe("number")
   })
 
   it("serves async health endpoint with unchanged response schema", async () => {
