@@ -114,9 +114,9 @@ export function buildQueryOptions(ctx: QueryContext) {
       ...(resumeSessionId ? { resume: resumeSessionId } : {}),
       ...(isUndo ? { forkSession: true, ...(undoRollbackUuid ? { resumeSessionAt: undoRollbackUuid } : {}) } : {}),
       ...(sdkHooks ? { hooks: sdkHooks } : {}),
-      ...(effort ? { effort: effort } : {}),
-      ...(thinking ? { thinking: thinking } : {}),
-      ...(taskBudget ? { taskBudget: taskBudget } : {}),
+      ...(effort ? { effort } : {}),
+      ...(thinking ? { thinking } : {}),
+      ...(taskBudget ? { taskBudget } : {}),
       ...(betas && betas.length > 0 ? { betas: betas as SdkBeta[] } : {}),
     }
   }

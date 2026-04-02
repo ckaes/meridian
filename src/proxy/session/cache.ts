@@ -182,15 +182,23 @@ export function lookupSession(
   return { type: "diverged" }
 }
 
+/** Look up a session state by its agent session ID.
+ *  Returns undefined if not found. Used by the context-usage endpoint. */
+export function getSessionById(agentSessionId: string): SessionState | undefined {
+  return sessionCache.get(agentSessionId)
+}
+
 /** Store a session mapping with lineage hash and SDK UUIDs for divergence detection.
  *  @param sdkMessageUuids — per-message SDK assistant UUIDs (null for user messages).
- *    If provided, merged with any previously stored UUIDs to build a complete map. */
+ *    If provided, merged with any previously stored UUIDs to build a complete map.
+ *  @param contextUsage — optional last observed token usage to attach to the session. */
 export function storeSession(
   sessionId: string | undefined,
   messages: Array<{ role: string; content: any }>,
   claudeSessionId: string,
   workingDirectory?: string,
-  sdkMessageUuids?: Array<string | null>
+  sdkMessageUuids?: Array<string | null>,
+  contextUsage?: Record<string, unknown>
 ) {
   if (!claudeSessionId) return
   const lineageHash = computeLineageHash(messages)
@@ -202,6 +210,7 @@ export function storeSession(
     lineageHash,
     messageHashes,
     sdkMessageUuids,
+    ...(contextUsage ? { contextUsage } : {}),
   }
   // In-memory cache
   if (sessionId) sessionCache.set(sessionId, state)

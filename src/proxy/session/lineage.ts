@@ -31,6 +31,8 @@ export interface SessionState {
    *  Only assistant messages have UUIDs (user messages are null).
    *  Used to find the rollback point for undo. */
   sdkMessageUuids?: Array<string | null>
+  /** Last observed context usage (input/output token counts) for this session */
+  contextUsage?: Record<string, unknown>
 }
 
 /**
