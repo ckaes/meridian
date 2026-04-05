@@ -401,10 +401,11 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
       const capturedToolUses: Array<{ id: string; name: string; input: any }> = []
       const fileChanges: FileChange[] = []
 
-      // In passthrough mode, register OpenCode's tools as MCP tools so Claude
-      // can actually call them (not just see them as text descriptions).
+      // Register client-provided tools as MCP tools so Claude can call them.
+      // MERIDIAN_FORWARD_TOOLS=1 enables this in non-passthrough mode.
+      const forwardTools = Boolean(process.env.MERIDIAN_FORWARD_TOOLS)
       let passthroughMcp: ReturnType<typeof createPassthroughMcpServer> | undefined
-      if (passthrough && Array.isArray(body.tools) && body.tools.length > 0) {
+      if ((passthrough || forwardTools) && Array.isArray(body.tools) && body.tools.length > 0) {
         passthroughMcp = createPassthroughMcpServer(body.tools)
       }
 
@@ -586,8 +587,8 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                 // Preserve ALL content blocks (text, tool_use, thinking, etc.)
                 for (const block of message.message.content) {
                   const b = block as unknown as Record<string, unknown>
-                  // In passthrough mode, strip MCP prefix from tool names
-                  if (passthrough && b.type === "tool_use" && typeof b.name === "string") {
+                  // Strip MCP prefix from client-provided tool names
+                  if (b.type === "tool_use" && typeof b.name === "string" && (b.name as string).startsWith(PASSTHROUGH_MCP_PREFIX)) {
                     b.name = stripMcpPrefix(b.name as string)
                   }
                   contentBlocks.push(b)
@@ -939,8 +940,8 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                     if (eventType === "content_block_start") {
                       const block = (event as any).content_block
                       if (block?.type === "tool_use" && typeof block.name === "string") {
-                        if (passthrough && block.name.startsWith(PASSTHROUGH_MCP_PREFIX)) {
-                          // Passthrough mode: strip prefix and forward to OpenCode
+                        if (block.name.startsWith(PASSTHROUGH_MCP_PREFIX)) {
+                          // Client-provided tool: strip prefix and forward
                           block.name = stripMcpPrefix(block.name)
                           // Track this tool_use ID so we don't emit it again from capturedToolUses
                           if (block.id) streamedToolUseIds.add(block.id)

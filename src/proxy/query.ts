@@ -92,8 +92,11 @@ export function buildQueryOptions(ctx: QueryContext) {
           }
         : {
             disallowedTools: blockedTools,
-            allowedTools: allowedMcpTools,
-            mcpServers: { [mcpServerName]: createOpencodeMcpServer() },
+            allowedTools: [...allowedMcpTools, ...(passthroughMcp ? passthroughMcp.toolNames : [])],
+            mcpServers: {
+              [mcpServerName]: createOpencodeMcpServer(),
+              ...(passthroughMcp ? { [PASSTHROUGH_MCP_NAME]: passthroughMcp.server } : {}),
+            },
           }),
       plugins: [],
       ...(onStderr ? { stderr: onStderr } : {}),
