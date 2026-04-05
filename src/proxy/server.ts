@@ -494,7 +494,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                   for await (const event of query(buildQueryOptions({
                     prompt: makePrompt(), model, workingDirectory, systemContext, claudeExecutable,
                     passthrough, stream: false, sdkAgents, passthroughMcp, cleanEnv,
-                    resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr,
+                    resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr, thinking: body.thinking,
                   }))) {
                     if ((event as any).type === "assistant") {
                       didYieldContent = true
@@ -789,7 +789,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                     for await (const event of query(buildQueryOptions({
                       prompt: makePrompt(), model, workingDirectory, systemContext, claudeExecutable,
                       passthrough, stream: true, sdkAgents, passthroughMcp, cleanEnv,
-                      resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr,
+                      resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr, thinking: body.thinking,
                     }))) {
                       if ((event as any).type === "stream_event") {
                         didYieldClientEvent = true

@@ -42,6 +42,8 @@ export interface QueryContext {
   adapter: AgentAdapter
   /** Callback to receive stderr lines from the Claude subprocess */
   onStderr?: (line: string) => void
+  /** Thinking configuration from the client request (e.g. { type: 'disabled' }) */
+  thinking?: { type: "enabled"; budget_tokens: number } | { type: "disabled" } | { type: "adaptive"; budget_tokens: number }
 }
 
 /**
@@ -53,7 +55,7 @@ export function buildQueryOptions(ctx: QueryContext) {
   const {
     prompt, model, workingDirectory, systemContext, claudeExecutable,
     passthrough, stream, sdkAgents, passthroughMcp, cleanEnv,
-    resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr,
+    resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr, thinking,
   } = ctx
 
   const blockedTools = [...adapter.getBlockedBuiltinTools(), ...adapter.getAgentIncompatibleTools()]
@@ -104,6 +106,7 @@ export function buildQueryOptions(ctx: QueryContext) {
       ...(resumeSessionId ? { resume: resumeSessionId } : {}),
       ...(isUndo ? { forkSession: true, ...(undoRollbackUuid ? { resumeSessionAt: undoRollbackUuid } : {}) } : {}),
       ...(sdkHooks ? { hooks: sdkHooks } : {}),
+      ...(thinking ? { thinking } : {}),
     }
   }
 }
