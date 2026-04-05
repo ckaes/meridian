@@ -148,6 +148,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
   // Each request spawns an SDK subprocess (cli.js, ~11MB). Spawning multiple
   // simultaneously can crash the process. Serialize SDK queries with a queue.
   const MAX_CONCURRENT_SESSIONS = parseInt((process.env.MERIDIAN_MAX_CONCURRENT ?? process.env.CLAUDE_PROXY_MAX_CONCURRENT) || "10", 10)
+  const STREAM_TIMEOUT_MS = parseInt((process.env.MERIDIAN_STREAM_TIMEOUT ?? process.env.CLAUDE_PROXY_STREAM_TIMEOUT) || "600000", 10) // 10 min default
   let activeSessions = 0
   const sessionQueue: Array<{ resolve: () => void }> = []
 
@@ -172,7 +173,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
 
   const handleMessages = async (
     c: Context,
-    requestMeta: { requestId: string; endpoint: string; queueEnteredAt: number; queueStartedAt: number }
+    requestMeta: { requestId: string; endpoint: string; queueEnteredAt: number; queueStartedAt: number; releaseOnce: () => void }
   ) => {
     const requestStartAt = Date.now()
 
@@ -524,7 +525,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                       prompt: buildFreshPrompt(allMessages, stripCacheControl),
                       model, workingDirectory, systemContext, claudeExecutable,
                       passthrough, stream: false, sdkAgents, passthroughMcp, cleanEnv,
-                      resumeSessionId: undefined, isUndo: false, undoRollbackUuid: undefined, sdkHooks, adapter, onStderr,
+                      resumeSessionId: undefined, isUndo: false, undoRollbackUuid: undefined, sdkHooks, adapter, onStderr, thinking: body.thinking,
                     }))
                     return
                   }
@@ -736,6 +737,10 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
             let textEventsForwarded = 0
             let bytesSent = 0
             let streamClosed = false
+            let streamTimedOut = false
+            const streamTimer = STREAM_TIMEOUT_MS > 0
+              ? setTimeout(() => { streamTimedOut = true }, STREAM_TIMEOUT_MS)
+              : undefined
 
             claudeLog("upstream.start", { mode: "stream", model })
 
@@ -819,7 +824,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                         prompt: buildFreshPrompt(allMessages, stripCacheControl),
                         model, workingDirectory, systemContext, claudeExecutable,
                         passthrough, stream: true, sdkAgents, passthroughMcp, cleanEnv,
-                        resumeSessionId: undefined, isUndo: false, undoRollbackUuid: undefined, sdkHooks, adapter, onStderr,
+                        resumeSessionId: undefined, isUndo: false, undoRollbackUuid: undefined, sdkHooks, adapter, onStderr, thinking: body.thinking,
                       }))
                       return
                     }
@@ -890,7 +895,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
 
               try {
                 for await (const message of response) {
-                  if (streamClosed) {
+                  if (streamClosed || streamTimedOut) {
                     break
                   }
 
@@ -1227,6 +1232,38 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                 try { controller.close() } catch {}
                 streamClosed = true
               }
+            } finally {
+              if (streamTimer) clearTimeout(streamTimer)
+              // Emit timeout error if the stream was aborted by the timer
+              if (streamTimedOut && !streamClosed) {
+                claudeLog("stream.timeout", {
+                  model,
+                  timeoutMs: STREAM_TIMEOUT_MS,
+                  streamEventsSeen,
+                  eventsForwarded,
+                  durationMs: Date.now() - requestStartAt,
+                })
+                if (messageStartEmitted) {
+                  safeEnqueue(encoder.encode(
+                    `event: message_delta\ndata: ${JSON.stringify({
+                      type: "message_delta",
+                      delta: { stop_reason: "end_turn", stop_sequence: null },
+                      usage: { output_tokens: 0 }
+                    })}\n\n`
+                  ), "timeout_message_delta")
+                  safeEnqueue(encoder.encode(
+                    `event: message_stop\ndata: {"type":"message_stop"}\n\n`
+                  ), "timeout_message_stop")
+                }
+                safeEnqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({
+                  type: "error",
+                  error: { type: "timeout_error", message: `Stream timed out after ${STREAM_TIMEOUT_MS / 1000}s. Configure MERIDIAN_STREAM_TIMEOUT to adjust.` }
+                })}\n\n`), "timeout_error_event")
+                try { controller.close() } catch {}
+                streamClosed = true
+              }
+              // Release concurrency slot when the stream actually finishes
+              requestMeta.releaseOnce()
             }
           }
         })
@@ -1289,10 +1326,19 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
     claudeLog("request.enter", { requestId, endpoint })
     await acquireSession()
     const queueStartedAt = Date.now()
+    let sessionReleased = false
+    const releaseOnce = () => {
+      if (!sessionReleased) {
+        sessionReleased = true
+        releaseSession()
+      }
+    }
     try {
-      return await handleMessages(c, { requestId, endpoint, queueEnteredAt, queueStartedAt })
+      return await handleMessages(c, { requestId, endpoint, queueEnteredAt, queueStartedAt, releaseOnce })
     } finally {
-      releaseSession()
+      // Safety net: release if handleMessages didn't (non-streaming path, or error before stream started).
+      // For streaming, the ReadableStream's finally block calls releaseOnce() when the stream ends.
+      releaseOnce()
     }
   }
 
