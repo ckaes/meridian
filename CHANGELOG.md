@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.2](https://github.com/rynfar/meridian/compare/v1.27.1...v1.27.2) (2026-04-05)
+
+
+### Bug Fixes
+
+* respect client stream parameter in passthrough adapter ([#254](https://github.com/rynfar/meridian/issues/254)) ([1ec2abb](https://github.com/rynfar/meridian/commit/1ec2abbc0f6196fda79ba6ce631e5829e06d0b7e))
+
 ## [1.27.1](https://github.com/rynfar/meridian/compare/v1.27.0...v1.27.1) (2026-04-05)
 
 
