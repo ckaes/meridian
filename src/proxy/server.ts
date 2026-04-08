@@ -1345,6 +1345,24 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
   app.post("/v1/messages", (c) => handleWithQueue(c, "/v1/messages"))
   app.post("/messages", (c) => handleWithQueue(c, "/messages"))
 
+  // Model validation — accepts models this proxy can map, rejects unknown ones
+  app.get("/v1/models/:modelId", (c) => {
+    const modelId = c.req.param("modelId")
+    const lower = modelId.toLowerCase()
+    if (!lower.includes("sonnet") && !lower.includes("opus") && !lower.includes("haiku")) {
+      return c.json({
+        type: "error",
+        error: { type: "not_found_error", message: `model: ${modelId}` },
+      }, 404)
+    }
+    return c.json({
+      id: modelId,
+      type: "model",
+      display_name: modelId,
+      created_at: "2025-01-01T00:00:00Z",
+    })
+  })
+
   // Telemetry dashboard and API
   app.route("/telemetry", createTelemetryRoutes())
 
