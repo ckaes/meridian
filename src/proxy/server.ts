@@ -22,6 +22,7 @@ import { mapModelToClaudeModel, resolveClaudeExecutableAsync, isClosedController
 import { getLastUserMessage } from "./messages"
 import { detectAdapter } from "./adapters/detect"
 import { buildQueryOptions, type QueryContext } from "./query"
+import { packetDebug } from "./packetDebug"
 import { createFileChangeHook, extractFileChangesFromMessages, formatFileChangeSummary, type FileChange } from "./fileChanges"
 import {
   computeLineageHash,
@@ -180,6 +181,10 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
     return withClaudeLogContext({ requestId: requestMeta.requestId, endpoint: requestMeta.endpoint }, async () => {
       try {
         const body = await c.req.json()
+        packetDebug(requestMeta.requestId, "CLIENT_READ", {
+          headers: Object.fromEntries(c.req.raw.headers.entries()),
+          body,
+        })
         const authStatus = await getClaudeAuthStatusAsync()
         let model = mapModelToClaudeModel(body.model || "sonnet", authStatus?.subscriptionType)
         const adapter = detectAdapter(c)
@@ -493,11 +498,13 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                 // only "assistant" messages represent actual response content.
                 let didYieldContent = false
                 try {
-                  for await (const event of query(buildQueryOptions({
+                  const queryOpts = buildQueryOptions({
                     prompt: makePrompt(), model, workingDirectory, systemContext, claudeExecutable,
                     passthrough, stream: false, sdkAgents, passthroughMcp, cleanEnv,
                     resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr, thinking: body.thinking,
-                  }))) {
+                  })
+                  packetDebug(requestMeta.requestId, "SERVER_WRITE", queryOpts, "non-streaming")
+                  for await (const event of query(queryOpts)) {
                     if ((event as any).type === "assistant") {
                       didYieldContent = true
                     }
@@ -521,12 +528,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                     evictSession(agentSessionId, workingDirectory, allMessages)
                     sdkUuidMap.length = 0
                     for (let i = 0; i < allMessages.length; i++) sdkUuidMap.push(null)
-                    yield* query(buildQueryOptions({
+                    const retryOpts = buildQueryOptions({
                       prompt: buildFreshPrompt(allMessages, stripCacheControl),
                       model, workingDirectory, systemContext, claudeExecutable,
                       passthrough, stream: false, sdkAgents, passthroughMcp, cleanEnv,
                       resumeSessionId: undefined, isUndo: false, undoRollbackUuid: undefined, sdkHooks, adapter, onStderr, thinking: body.thinking,
-                    }))
+                    })
+                    packetDebug(requestMeta.requestId, "SERVER_WRITE", retryOpts, "non-streaming:stale-retry")
+                    yield* query(retryOpts)
                     return
                   }
 
@@ -566,6 +575,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
             })()
 
             for await (const message of response) {
+              packetDebug(requestMeta.requestId, "SERVER_READ", message, "non-streaming")
               // Capture session ID from SDK messages
               if ((message as any).session_id) {
                 currentSessionId = (message as any).session_id
@@ -710,20 +720,22 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
 
               const responseSessionId = currentSessionId || resumeSessionId || `session_${Date.now()}`
 
-              return new Response(JSON.stringify({
-            id: `msg_${Date.now()}`,
-            type: "message",
-            role: "assistant",
-            content: contentBlocks,
-            model: body.model,
-            stop_reason: stopReason,
-            usage: { input_tokens: 0, output_tokens: 0 }
-          }), {
-            headers: {
-              "Content-Type": "application/json",
-              "X-Claude-Session-ID": responseSessionId,
-            }
-          })
+              const responseBody = {
+                id: `msg_${Date.now()}`,
+                type: "message",
+                role: "assistant",
+                content: contentBlocks,
+                model: body.model,
+                stop_reason: stopReason,
+                usage: { input_tokens: 0, output_tokens: 0 }
+              }
+              packetDebug(requestMeta.requestId, "CLIENT_WRITE", responseBody, "non-streaming")
+              return new Response(JSON.stringify(responseBody), {
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Claude-Session-ID": responseSessionId,
+                }
+              })
         }
 
         const encoder = new TextEncoder()
@@ -792,11 +804,13 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                   // not prevent retry. Only stream_event types become SSE output.
                   let didYieldClientEvent = false
                   try {
-                    for await (const event of query(buildQueryOptions({
+                    const queryOpts = buildQueryOptions({
                       prompt: makePrompt(), model, workingDirectory, systemContext, claudeExecutable,
                       passthrough, stream: true, sdkAgents, passthroughMcp, cleanEnv,
                       resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr, thinking: body.thinking,
-                    }))) {
+                    })
+                    packetDebug(requestMeta.requestId, "SERVER_WRITE", queryOpts, "streaming")
+                    for await (const event of query(queryOpts)) {
                       if ((event as any).type === "stream_event") {
                         didYieldClientEvent = true
                       }
@@ -820,12 +834,14 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                       evictSession(agentSessionId, workingDirectory, allMessages)
                       sdkUuidMap.length = 0
                       for (let i = 0; i < allMessages.length; i++) sdkUuidMap.push(null)
-                      yield* query(buildQueryOptions({
+                      const retryOpts = buildQueryOptions({
                         prompt: buildFreshPrompt(allMessages, stripCacheControl),
                         model, workingDirectory, systemContext, claudeExecutable,
                         passthrough, stream: true, sdkAgents, passthroughMcp, cleanEnv,
                         resumeSessionId: undefined, isUndo: false, undoRollbackUuid: undefined, sdkHooks, adapter, onStderr, thinking: body.thinking,
-                      }))
+                      })
+                      packetDebug(requestMeta.requestId, "SERVER_WRITE", retryOpts, "streaming:stale-retry")
+                      yield* query(retryOpts)
                       return
                     }
 
@@ -898,6 +914,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                   if (streamClosed || streamTimedOut) {
                     break
                   }
+                  packetDebug(requestMeta.requestId, "SERVER_READ", message, "streaming")
 
                   // Capture session ID and assistant UUID from any SDK message
                   if ((message as any).session_id) {
@@ -983,6 +1000,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                     }
 
                     // Forward all other events (text, non-MCP tool_use like Task, message events)
+                    packetDebug(requestMeta.requestId, "CLIENT_WRITE", { eventType, event }, "streaming")
                     const payload = encoder.encode(`event: ${eventType}\ndata: ${JSON.stringify(event)}\n\n`)
                     if (!safeEnqueue(payload, `stream_event:${eventType}`)) {
                       break
@@ -1000,6 +1018,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                       (event as any).delta?.stop_reason === "tool_use" &&
                       streamedToolUseIds.size > 0
                     ) {
+                      packetDebug(requestMeta.requestId, "CLIENT_WRITE", { eventType: "message_stop", event: { type: "message_stop" } }, "streaming:passthrough-stop")
                       safeEnqueue(
                         encoder.encode(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`),
                         "passthrough_tool_stream_stop"
@@ -1121,6 +1140,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
 
                 // Emit the final message_stop (we skipped all intermediate ones)
                 if (messageStartEmitted) {
+                  packetDebug(requestMeta.requestId, "CLIENT_WRITE", { eventType: "message_stop", event: { type: "message_stop" } }, "streaming:final")
                   safeEnqueue(encoder.encode(`event: message_stop\ndata: {"type":"message_stop"}\n\n`), "final_message_stop")
                 }
 
@@ -1212,22 +1232,20 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
               // If we already emitted message_start, close the message cleanly so
               // clients that access usage.input_tokens don't crash on the incomplete response.
               if (messageStartEmitted) {
+                const errorDelta = { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 0 } }
+                packetDebug(requestMeta.requestId, "CLIENT_WRITE", { eventType: "message_delta", event: errorDelta }, "streaming:error")
                 safeEnqueue(encoder.encode(
-                  `event: message_delta\ndata: ${JSON.stringify({
-                    type: "message_delta",
-                    delta: { stop_reason: "end_turn", stop_sequence: null },
-                    usage: { output_tokens: 0 }
-                  })}\n\n`
+                  `event: message_delta\ndata: ${JSON.stringify(errorDelta)}\n\n`
                 ), "error_message_delta")
+                packetDebug(requestMeta.requestId, "CLIENT_WRITE", { eventType: "message_stop", event: { type: "message_stop" } }, "streaming:error")
                 safeEnqueue(encoder.encode(
                   `event: message_stop\ndata: {"type":"message_stop"}\n\n`
                 ), "error_message_stop")
               }
 
-              safeEnqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({
-                type: "error",
-                error: { type: streamErr.type, message: streamErr.message }
-              })}\n\n`), "error_event")
+              const errorEvent = { type: "error", error: { type: streamErr.type, message: streamErr.message } }
+              packetDebug(requestMeta.requestId, "CLIENT_WRITE", { eventType: "error", event: errorEvent }, "streaming:error")
+              safeEnqueue(encoder.encode(`event: error\ndata: ${JSON.stringify(errorEvent)}\n\n`), "error_event")
               if (!streamClosed) {
                 try { controller.close() } catch {}
                 streamClosed = true
