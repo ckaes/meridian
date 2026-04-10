@@ -296,12 +296,18 @@ See [`adapters/detect.ts`](src/proxy/adapters/detect.ts) and [`adapters/opencode
 |----------|-------|---------|-------------|
 | `MERIDIAN_PORT` | `CLAUDE_PROXY_PORT` | `3456` | Port to listen on |
 | `MERIDIAN_HOST` | `CLAUDE_PROXY_HOST` | `127.0.0.1` | Host to bind to |
-| `MERIDIAN_PASSTHROUGH` | `CLAUDE_PROXY_PASSTHROUGH` | unset | Forward tool calls to client instead of executing |
+| `MERIDIAN_IDLE_TIMEOUT_SECONDS` | `CLAUDE_PROXY_IDLE_TIMEOUT_SECONDS` | `120` | HTTP keep-alive timeout (seconds) |
+| `MERIDIAN_WORKDIR` | `CLAUDE_PROXY_WORKDIR` | `cwd()` | Default working directory for SDK and MCP tools |
+| `MERIDIAN_PASSTHROUGH` | `CLAUDE_PROXY_PASSTHROUGH` | unset | Forward tool calls to client instead of executing internally |
+| `MERIDIAN_FORWARD_TOOLS` | — | unset | Register client-provided tools as MCP tools in non-passthrough mode |
+| `MERIDIAN_DEBUG` | `CLAUDE_PROXY_DEBUG` | unset | Enable debug logging (`1` to enable) |
+| `FULL_PROXY_DEBUG` | — | unset | Log complete, unredacted request/response packets to stderr (`1` to enable). **Never use in production.** |
+| `MERIDIAN_SONNET_MODEL` | `CLAUDE_PROXY_SONNET_MODEL` | auto | Override Sonnet model tier. Accepted values: `sonnet`, `sonnet[1m]`. Auto-detected from subscription when unset |
 | `MERIDIAN_MAX_CONCURRENT` | `CLAUDE_PROXY_MAX_CONCURRENT` | `10` | Maximum concurrent SDK sessions |
+| `MERIDIAN_STREAM_TIMEOUT` | `CLAUDE_PROXY_STREAM_TIMEOUT` | `600000` | Stream inactivity timeout in milliseconds (default 10 minutes) |
 | `MERIDIAN_MAX_SESSIONS` | `CLAUDE_PROXY_MAX_SESSIONS` | `1000` | In-memory LRU session cache size |
 | `MERIDIAN_MAX_STORED_SESSIONS` | `CLAUDE_PROXY_MAX_STORED_SESSIONS` | `10000` | File-based session store capacity |
-| `MERIDIAN_WORKDIR` | `CLAUDE_PROXY_WORKDIR` | `cwd()` | Default working directory for SDK |
-| `MERIDIAN_IDLE_TIMEOUT_SECONDS` | `CLAUDE_PROXY_IDLE_TIMEOUT_SECONDS` | `120` | HTTP keep-alive timeout |
+| `MERIDIAN_SESSION_DIR` | `CLAUDE_PROXY_SESSION_DIR` | `~/.cache/meridian/` | Directory for persistent session store |
 | `MERIDIAN_TELEMETRY_SIZE` | `CLAUDE_PROXY_TELEMETRY_SIZE` | `1000` | Telemetry ring buffer size |
 | `MERIDIAN_NO_FILE_CHANGES` | `CLAUDE_PROXY_NO_FILE_CHANGES` | unset | Disable "Files changed" summary in responses |
 

@@ -12,6 +12,8 @@ bun.lockb
 .vscode/
 *.swp
 *.swo
+meridian.sublime-project
+meridian.sublime-workspace
 
 # OS
 .DS_Store
