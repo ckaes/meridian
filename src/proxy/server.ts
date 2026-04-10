@@ -415,6 +415,12 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
         passthroughMcp = createPassthroughMcpServer(body.tools)
       }
 
+      // When forward-tools mode has tool_choice forcing a specific tool,
+      // apply the same capture-and-block pattern as passthrough mode
+      // (scoped to forwarded tools only, so internal tools still work).
+      const toolChoice = body.tool_choice as { type: string; name?: string } | undefined
+      const forcedToolChoice = forwardTools && !passthrough && toolChoice?.type === "tool" && !!toolChoice?.name
+
 
 
       // In passthrough mode: block ALL tools, capture them for forwarding (agent-agnostic).
@@ -424,6 +430,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
       const mcpPrefix = `mcp__${adapter.getMcpServerName()}__`
       const trackFileChanges = !(process.env.MERIDIAN_NO_FILE_CHANGES ?? process.env.CLAUDE_PROXY_NO_FILE_CHANGES)
       const fileChangeHook = trackFileChanges ? createFileChangeHook(fileChanges, mcpPrefix) : undefined
+
+      // Build adapter hooks once so we can merge them with forced-tool-choice hooks
+      const adapterHooks = (!passthrough && adapter.buildSdkHooks?.(body, sdkAgents)) || {}
 
       const sdkHooks = passthrough
         ? {
@@ -443,8 +452,31 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
             }],
           }
         : {
-            ...(adapter.buildSdkHooks?.(body, sdkAgents) ?? {}),
+            ...adapterHooks,
             ...(fileChangeHook ? { PostToolUse: [fileChangeHook] } : {}),
+            // NOTE: agent-specific (forward-tools + forced tool_choice) — capture and
+            // block forwarded tool calls so they're returned to the client as tool_use
+            // blocks, matching the passthrough behavior. Internal tools pass through.
+            ...(forcedToolChoice ? {
+              PreToolUse: [
+                ...((adapterHooks as any).PreToolUse ?? []),
+                {
+                  matcher: "",
+                  hooks: [async (input: any) => {
+                    if (!input.tool_name.startsWith(PASSTHROUGH_MCP_PREFIX)) return undefined
+                    capturedToolUses.push({
+                      id: input.tool_use_id,
+                      name: stripMcpPrefix(input.tool_name),
+                      input: input.tool_input,
+                    })
+                    return {
+                      decision: "block" as const,
+                      reason: "Forwarding to client for execution",
+                    }
+                  }],
+                },
+              ],
+            } : {}),
           }
 
         // Capture subprocess stderr for all paths — used to surface the real
@@ -502,6 +534,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                     prompt: makePrompt(), model, workingDirectory, systemContext, claudeExecutable,
                     passthrough, stream: false, sdkAgents, passthroughMcp, cleanEnv,
                     resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr, thinking: body.thinking,
+                    forcedToolChoice,
                   })
                   packetDebug(requestMeta.requestId, "SERVER_WRITE", queryOpts, "non-streaming")
                   for await (const event of query(queryOpts)) {
@@ -533,6 +566,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                       model, workingDirectory, systemContext, claudeExecutable,
                       passthrough, stream: false, sdkAgents, passthroughMcp, cleanEnv,
                       resumeSessionId: undefined, isUndo: false, undoRollbackUuid: undefined, sdkHooks, adapter, onStderr, thinking: body.thinking,
+                      forcedToolChoice,
                     })
                     packetDebug(requestMeta.requestId, "SERVER_WRITE", retryOpts, "non-streaming:stale-retry")
                     yield* query(retryOpts)
@@ -628,9 +662,9 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
             throw error
           }
 
-          // In passthrough mode, add captured tool_use blocks from the hook
-          // (the SDK may not include them in content after blocking)
-          if (passthrough && capturedToolUses.length > 0) {
+          // In passthrough / forced-tool-choice mode, add captured tool_use blocks
+          // from the hook (the SDK may not include them in content after blocking)
+          if ((passthrough || forcedToolChoice) && capturedToolUses.length > 0) {
             for (const tu of capturedToolUses) {
               // Only add if not already in contentBlocks
               if (!contentBlocks.some((b) => b.type === "tool_use" && (b as any).id === tu.id)) {
@@ -808,6 +842,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                       prompt: makePrompt(), model, workingDirectory, systemContext, claudeExecutable,
                       passthrough, stream: true, sdkAgents, passthroughMcp, cleanEnv,
                       resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr, thinking: body.thinking,
+                      forcedToolChoice,
                     })
                     packetDebug(requestMeta.requestId, "SERVER_WRITE", queryOpts, "streaming")
                     for await (const event of query(queryOpts)) {
@@ -839,6 +874,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                         model, workingDirectory, systemContext, claudeExecutable,
                         passthrough, stream: true, sdkAgents, passthroughMcp, cleanEnv,
                         resumeSessionId: undefined, isUndo: false, undoRollbackUuid: undefined, sdkHooks, adapter, onStderr, thinking: body.thinking,
+                        forcedToolChoice,
                       })
                       packetDebug(requestMeta.requestId, "SERVER_WRITE", retryOpts, "streaming:stale-retry")
                       yield* query(retryOpts)
@@ -1007,13 +1043,13 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                     }
                     eventsForwarded += 1
 
-                    // NOTE: agent-specific (passthrough mode) — break immediately when
-                    // the model stops for tool_use so the client can execute the tools
-                    // and send results back. Without this the SDK executes the passthrough
-                    // MCP no-op (→ "passthrough"), feeds that back to the model, and the
-                    // model produces an incorrect fallback response which gets forwarded.
+                    // NOTE: agent-specific (passthrough / forced-tool-choice mode) —
+                    // break immediately when the model stops for tool_use so the client
+                    // can execute the tools and send results back. Without this the SDK
+                    // executes the passthrough MCP no-op (→ "passthrough"), feeds that
+                    // back to the model, and produces an incorrect fallback response.
                     if (
-                      passthrough &&
+                      (passthrough || forcedToolChoice) &&
                       eventType === "message_delta" &&
                       (event as any).delta?.stop_reason === "tool_use" &&
                       streamedToolUseIds.size > 0
@@ -1058,7 +1094,7 @@ export function createProxyServer(config: Partial<ProxyConfig> = {}): ProxyServe
                 // In passthrough mode, emit captured tool_use blocks as stream events
                 // Skip any that were already forwarded during the stream (dedup by ID)
                 const unseenToolUses = capturedToolUses.filter(tu => !streamedToolUseIds.has(tu.id))
-                if (passthrough && unseenToolUses.length > 0 && messageStartEmitted) {
+                if ((passthrough || forcedToolChoice) && unseenToolUses.length > 0 && messageStartEmitted) {
                   for (let i = 0; i < unseenToolUses.length; i++) {
                     const tu = unseenToolUses[i]!
                     const blockIndex = eventsForwarded + i

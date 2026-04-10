@@ -44,6 +44,8 @@ export interface QueryContext {
   onStderr?: (line: string) => void
   /** Thinking configuration from the client request (e.g. { type: 'disabled' }) */
   thinking?: { type: "enabled"; budget_tokens: number } | { type: "disabled" } | { type: "adaptive"; budget_tokens: number }
+  /** Whether tool_choice forces a specific forwarded tool (forward-tools mode only) */
+  forcedToolChoice?: boolean
 }
 
 /**
@@ -56,6 +58,7 @@ export function buildQueryOptions(ctx: QueryContext) {
     prompt, model, workingDirectory, systemContext, claudeExecutable,
     passthrough, stream, sdkAgents, passthroughMcp, cleanEnv,
     resumeSessionId, isUndo, undoRollbackUuid, sdkHooks, adapter, onStderr, thinking,
+    forcedToolChoice,
   } = ctx
 
   const blockedTools = [...adapter.getBlockedBuiltinTools(), ...adapter.getAgentIncompatibleTools()]
@@ -70,7 +73,11 @@ export function buildQueryOptions(ctx: QueryContext) {
       // Turn 2: SDK processes the blocked-tool handoff before the generator
       //         returns. maxTurns: 1 throws "Reached maximum number of turns (1)"
       //         before the response is complete, causing HTTP 500s.
-      maxTurns: passthrough ? 2 : 200,
+      // NOTE: agent-specific (forward-tools + forced tool_choice) — same 2-turn
+      // capture pattern as passthrough: Turn 1 generates tool_use, Turn 2 the SDK
+      // processes the block before returning. Without this limit the SDK executes
+      // the no-op MCP handler and produces a junk follow-up.
+      maxTurns: (passthrough || forcedToolChoice) ? 2 : 200,
       cwd: workingDirectory,
       model,
       pathToClaudeCodeExecutable: claudeExecutable,
